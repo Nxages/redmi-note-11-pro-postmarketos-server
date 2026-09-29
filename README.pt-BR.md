@@ -9,10 +9,13 @@ English: [README.md](README.md)
 
 > **Aviso.** Isto sobrescreve parte da partição `super` e troca o `boot_b`. Exige
 > bootloader desbloqueado e pode inutilizar o aparelho. A faixa de armazenamento usada
-> sobrepõe o slot inativo do Android, então **uma atualização OTA ou a troca de slot
-> pode destruir o seu Linux**. Leia a seção 0 de [docs/TUTORIAL.pt-BR.md](docs/TUTORIAL.pt-BR.md)
-> antes de qualquer coisa. É um relato de campo de uma unidade, não um procedimento
-> suportado. Sem vínculo com Xiaomi, MediaTek ou postmarketOS.
+> sobrepõe a tabela antiga do slot inativo do Android e é onde uma OTA Virtual A/B
+> guarda os snapshots, então **uma atualização OTA ou a troca de slot pode destruir o
+> seu Linux**. Só para o `pissarro` (MT6877 / Dimensity 920): outros aparelhos vendidos
+> como Redmi Note 11 Pro, como os modelos globais 4G e 5G, são outro hardware. Leia a
+> seção 0 de [docs/TUTORIAL.pt-BR.md](docs/TUTORIAL.pt-BR.md) antes de qualquer coisa.
+> É um relato de campo de uma unidade, não um procedimento suportado. Sem vínculo com
+> Xiaomi, MediaTek ou postmarketOS.
 
 ## O que foi verificado na unidade de referência
 
@@ -26,9 +29,9 @@ English: [README.md](README.md)
 | Ciclos de reinício | 5 de 5 aprovados |
 | Janela de carga 60–80 %, proteção térmica | funcionando |
 | Nós de tela, câmera e microfone desativados | funcionando |
-| Imagem de boot reproduzível a partir dos fontes daqui | idêntica byte a byte à instalada |
+| Montador da imagem de boot (`tools/build-boot-image.py`) | reproduziu a imagem instalada byte a byte a partir das mesmas entradas |
 | Script de configuração do rootfs | executado contra uma cópia nova do rootfs; mesmos binários e runlevel do aparelho |
-| Teste de estabilidade de 24 h | em andamento na data em que isto foi escrito |
+| Teste de estabilidade de 24 h | a primeira rodada foi encerrada pela queda de Wi-Fi de 5 h acima; uma segunda rodada, com o vigia, estava em andamento na data em que isto foi escrito |
 
 ## O que há aqui
 

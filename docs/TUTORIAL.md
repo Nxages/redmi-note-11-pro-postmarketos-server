@@ -14,15 +14,24 @@ starting point, not as a supported procedure.
 partition and replaces `boot_b`. It needs an unlocked bootloader. Do not start
 without complete, hash-verified backups and a working `fastboot` connection.
 
+**Only for `pissarro`** (MediaTek MT6877 / Dimensity 920). Other phones sold as
+"Redmi Note 11 Pro", such as the global 4G and 5G models, have different chips and
+partition layouts: nothing here applies to them. Section 3 starts by checking
+`ro.product.device`.
+
 The design has sharp edges you must understand before you copy it:
 
 | Fact | Consequence |
 |---|---|
-| The rootfs lives in a 4 GiB **range inside `super`**, not in its own partition. | The range is only "free" because Android runs from slot B and the range overlaps **inactive slot A** extents. |
-| An OTA update, or switching the active slot, can overwrite that range. | Your Linux can be destroyed by Android. Disable OTA and never switch slots. |
+| The rootfs lives in a 4 GiB **range inside `super`**, not in its own partition. | The range is outside every partition the active slot (B) uses, but it overlaps partitions still listed in the older **slot A** table. It is not free space in any official sense. |
+| This phone is **Virtual A/B**: an OTA writes its snapshot data into free space of `super`. Switching slots boots slot A's table. | Either one can overwrite the range and destroy your Linux. Disable OTA and never switch slots. |
 | `boot_b` is replaced by the Linux boot image. | Android does not boot until you restore the original `boot_b` (procedure in section 11). |
 | Android's `userdata` (F2FS, encrypted) is left alone. | You only get 4 GiB of rootfs. Using `userdata` would mean erasing Android for good: not covered here. |
 | Only the Wi-Fi radio works. | No mobile data, GPU, audio, camera, display, Bluetooth. That is fine for a headless server. |
+
+Never relock the bootloader (`fastboot flashing lock`) while `boot_b` or `super`
+differ from stock: a locked bootloader refuses modified images, and the phone may
+no longer boot at all.
 
 Nothing here is endorsed by Xiaomi, MediaTek or postmarketOS.
 
@@ -39,8 +48,8 @@ Nothing here is endorsed by Xiaomi, MediaTek or postmarketOS.
                        └─ switch_root → OpenRC (postmarketOS/Alpine)
                             wifi ─ nftables ─ sshd ─ thermal/charge ─ boot-confirm
                                                               │
-               boot-confirm checks Wi-Fi, IP, route, gateway, firewall, SSH port
-               and only then SIGSTOPs the watchdog ("this boot is good").
+               boot-confirm checks Wi-Fi, IP, route, gateway, firewall, SSH port and
+               thermal guard, and only then SIGSTOPs the watchdog ("this boot is good").
 ```
 
 Two safety ideas carry the whole thing:
@@ -54,7 +63,8 @@ Two safety ideas carry the whole thing:
 ## 2. What you need
 
 - A Redmi Note 11 Pro (pissarro) with an **unlocked bootloader** and root on Android
-  (we used Magisk) to read partitions and calibration data.
+  (we used Magisk) to read partitions and calibration data. Allow root for the
+  `adb` shell when Magisk asks.
 - A Linux x86_64 build host (a VM or WSL works). Tools: `git`, `python3`, `gcc-aarch64-linux-gnu`,
   `qemu-user-static` with binfmt for aarch64, `e2fsprogs`, `android-tools` (`adb`,
   `fastboot`), `pyserial`. Roughly 60 GB free disk.
@@ -67,27 +77,34 @@ Adapt the examples: the documentation uses `192.168.1.50` for the phone and
 
 ## 3. Back up everything first
 
+Blocks marked **phone** run in a root shell on the phone: `adb shell`, then `su`.
+Blocks marked **PC** run on your computer. A one-line `adb` command that needs root
+passes the whole remote command as **one** quoted argument, as in
+`adb exec-out "su -c '...'"`. adb joins its arguments without quoting, so in
+`adb shell su -c 'a | b'` the `| b` part would run on the phone *without* root; a
+write or restore written that way fails.
+
 Check which slot Android runs from (`ro.boot.slot_suffix`); this tutorial assumes
 **`_b`**. If yours is `_a`, mirror every `_b`/`_a` below and re-do the range check
 in section 4 for your layout.
 
-On the phone, as root, record identity and hashes; keep all backups **off** the
-phone and private:
+**Phone:** record identity and hashes. Stop if the first line is not `pissarro`:
 
 ```sh
 getprop ro.product.device            # pissarro
 getprop ro.boot.slot_suffix          # _b
-sha256sum /dev/block/by-name/boot_b
+sha256sum /dev/block/by-name/boot_b /dev/block/by-name/super
 blockdev --getsize64 /dev/block/by-name/super
 ```
 
-Copy these to your PC and verify the hash after each transfer (`adb exec-out` from
-Linux/macOS/WSL, never through a Windows console pipe, which corrupts binary data):
+**PC:** copy both and verify each hash after the transfer (`adb exec-out` from
+Linux/macOS/WSL, never through a Windows console pipe, which corrupts binary data).
+Keep all backups **off** the phone and private:
 
 ```sh
-adb exec-out su -c 'cat /dev/block/by-name/boot_b' > boot_b.img
-adb exec-out su -c 'cat /dev/block/by-name/super'  > super-full.img     # ~8.5 GiB
-sha256sum boot_b.img super-full.img   # compare with the phone's sha256sum output
+adb exec-out "su -c 'cat /dev/block/by-name/boot_b'" > boot_b.img
+adb exec-out "su -c 'cat /dev/block/by-name/super'"  > super-full.img     # ~8.5 GiB
+sha256sum boot_b.img super-full.img   # must equal the phone's output above
 chmod 0444 boot_b.img super-full.img
 ```
 
@@ -96,45 +113,53 @@ Also keep `boot_a`, `vbmeta*` and anything else you can. Do **not** touch
 
 ## 4. Choose the storage range inside `super`
 
-`super` holds Android's logical partitions. Dump both slots' tables:
+`super` holds Android's logical partitions. **PC:** dump both slots' tables and
+check the range:
 
 ```sh
-adb shell su -c 'lpdump --slot=1' > lp-active.txt     # slot b
-adb shell su -c 'lpdump --slot=0' > lp-inactive.txt   # slot a
+adb exec-out "su -c 'lpdump --slot=1'" > lp-active.txt     # slot b
+adb exec-out "su -c 'lpdump --slot=0'" > lp-inactive.txt   # slot a
 python3 tools/check-super-range.py --active lp-active.txt --inactive lp-inactive.txt
 ```
 
 On our unit the active slot B partitions ended at 3.47 GiB of an 8.5 GiB `super`,
-so `[4 GiB, 8 GiB)` did not touch them. It **did** overlap slot A's table, which is
-why this is a hack, not a layout. The script exits with an error if the range
-overlaps the active slot or runs past the end. Never write a range it rejects.
+so `[4 GiB, 8 GiB)` did not touch them. It **did** overlap partitions still listed
+in slot A's older table, which is why this is a hack, not a layout. `lpdump` also
+reported `virtual_ab_device`: the next OTA would put its snapshot data in free
+space of `super`, that is, in this range. The script exits with an error if the
+range overlaps the active slot or runs past the end. Never write a range it rejects.
 
-Save the original bytes of exactly that range and verify them:
+Save the original bytes of exactly that range on the **PC**, then hash the same
+range on the **phone**. The two hashes must match:
 
 ```sh
-adb exec-out su -c 'dd if=/dev/block/by-name/super bs=4M skip=1024 count=1024 2>/dev/null' \
+# PC
+adb exec-out "su -c 'dd if=/dev/block/by-name/super bs=4194304 skip=1024 count=1024 2>/dev/null'" \
   | gzip -1 > super-range-original.bin.gz
-# on the phone: dd if=/dev/block/by-name/super bs=4M skip=1024 count=1024 | sha256sum
-# on the PC:    gzip -dc super-range-original.bin.gz | sha256sum      (must match)
+gzip -dc super-range-original.bin.gz | sha256sum
+# phone
+dd if=/dev/block/by-name/super bs=4194304 skip=1024 count=1024 2>/dev/null | sha256sum
 ```
 
-(`bs=4M skip=1024` is 4 GiB in; `count=1024` is 4 GiB long.)
+(`bs=4194304 skip=1024` starts 4 GiB in; `count=1024` is 4 GiB long.) Write this
+hash down: section 11 checks the restore against it.
 
 ## 5. Get the Wi-Fi firmware and calibration from your phone
 
 The MT6877 connectivity chip needs its firmware and a per-unit calibration blob.
 **Both belong to your phone and must never be published**; the calibration also
-contains your Wi-Fi hardware address. Copy them from Android (root) and keep them
-private:
+contains your Wi-Fi hardware address. **PC:** copy them from Android (root) and keep
+them private:
 
 ```sh
+mkdir -p private/vendor-firmware && chmod 700 private
 # firmware (8 files)
 for f in conninfra.cfg wifi.cfg WIFI_RAM_CODE_soc5_0_1_1.bin soc5_0_ram_mcu_1_1_hdr.bin \
          soc5_0_ram_wmmcu_1_1_hdr.bin soc5_0_ram_bt_1_1_hdr.bin BT_FW.cfg fm_cust.cfg; do
-  adb exec-out su -c "cat /vendor/firmware/$f" > private/vendor-firmware/$f
+  adb exec-out "su -c 'cat /vendor/firmware/$f'" > private/vendor-firmware/$f
 done
 # calibration (a small file, at most 8192 bytes)
-adb exec-out su -c 'cat /mnt/vendor/nvdata/APCFG/APRDEB/WIFI' > private/wifi-nvram.bin
+adb exec-out "su -c 'cat /mnt/vendor/nvdata/APCFG/APRDEB/WIFI'" > private/wifi-nvram.bin
 ```
 
 Create a `wpa_supplicant.conf` for your own network (mode 0600, never committed):
@@ -155,23 +180,31 @@ write-up. Expect to adapt it.*
 
 We used [pmbootstrap](https://gitlab.postmarketos.org/postmarketOS/pmbootstrap) and
 [pmaports](https://gitlab.postmarketos.org/postmarketOS/pmaports) at the commits
-below, inside a dedicated build VM:
+below, inside a dedicated build VM, as an unprivileged user:
 
 ```
-pmbootstrap  edb3097c7307216b088478b7c424ee07d636f41b
+pmbootstrap  edb3097c7307216b088478b7c424ee07d636f41b   (v3.11.1, installed in a Python venv)
 pmaports     972f578fc9e87831adc4b3c7ba4c0d66461f2060
 ```
 
 Copy `port/device-xiaomi-pissarro` and `port/linux-xiaomi-pissarro` into
-`pmaports/device/downstream/`, then configure and build:
+`device/downstream/` of that pmaports checkout and point pmbootstrap at it with
+`-p` (otherwise it uses its own clone). `pmbootstrap init` asks the same questions
+interactively; this is our non-interactive equivalent, then the build and the
+rootfs installation:
 
 ```sh
-pmbootstrap config device xiaomi-pissarro
-pmbootstrap config ui console
-pmbootstrap config service_manager openrc
-pmbootstrap config extra_packages openssh,wpa_supplicant,nftables
-pmbootstrap build linux-xiaomi-pissarro
-pmbootstrap build device-xiaomi-pissarro
+pmb="pmbootstrap -p /path/to/pmaports"
+$pmb config device xiaomi-pissarro
+$pmb config ui console
+$pmb config service_manager openrc
+$pmb config extra_packages openssh,wpa_supplicant,nftables
+$pmb config hostname my-server       # optional; user and timezone are yours to set too
+$pmb build linux-xiaomi-pissarro
+$pmb build device-xiaomi-pissarro
+# the password belongs to pmbootstrap's default user; configure-rootfs.sh locks it
+$pmb install --no-image --no-recommends --password "$(openssl rand -hex 16)"
+$pmb shutdown                        # unmount everything inside the chroots
 ```
 
 Notes from the kernel build:
@@ -191,14 +224,22 @@ Extract the kernel from the package (the `.apk` is a concatenation of gzip tar
 streams):
 
 ```sh
-# the built package is somewhere under pmbootstrap's work/packages/ directory
+# the package is in pmbootstrap's work directory, under packages/edge/aarch64/
 tar --ignore-zeros -xzf linux-xiaomi-pissarro-4.14.356-r0.apk boot/vmlinuz
 mv boot/vmlinuz Image.gz
 ```
 
-For the rootfs we used the directory tree that `pmbootstrap install` leaves in
-its work directory (`work/chroot_rootfs_xiaomi-pissarro`): a plain Alpine/OpenRC
-aarch64 tree, about 560 MB, without a display manager. Copy it somewhere you own.
+`pmbootstrap install --no-image` leaves the rootfs as a directory tree in its work
+directory (`chroot_rootfs_xiaomi-pissarro`): a plain Alpine/OpenRC aarch64 tree,
+about 560 MB, without a display manager. Copy it somewhere you own, preserving
+owners, modes, ACLs and extended attributes:
+
+```sh
+sudo mkdir rootfs-copy
+sudo tar --one-file-system --acls --xattrs --numeric-owner -cpf - \
+     -C /path/to/work/chroot_rootfs_xiaomi-pissarro . \
+  | sudo tar --acls --xattrs --numeric-owner -xpf - -C rootfs-copy
+```
 
 ## 7. Build the helpers and the boot image
 
@@ -219,7 +260,8 @@ longer matches, which only works with an **unlocked** bootloader.
 
 *Verified:* on our unit this script reproduced the installed boot image
 byte for byte (same SHA-256) from the original `boot_b`, the compiled `Image.gz`
-and the `init` built from the same source.
+and the installed `init`. The `init` built from `src/initramfs` today differs from
+that one only in its log marker string, so your image will not have the same hash.
 
 Sanity-check your result before flashing anything:
 
@@ -247,9 +289,11 @@ copies your **public** key; the SSH host key is generated inside the rootfs.
 expected default runlevel and the same helper binaries (hashes) that run on the
 phone. Read the script before running it.
 
-Create the image. The ext4 features matter: the kernel is 4.14, so avoid anything
-newer than it understands (`orphan_file` and `metadata_csum_seed` are the two that
-newer e2fsprogs enable):
+Create the image. The ext4 features matter: `orphan_file`, a default since
+e2fsprogs 1.47, needs kernel 5.15 or newer, so it must be off for this 4.14 kernel.
+We also turned off `metadata_csum_seed`, the other new default, to keep the feature
+set we tested. With e2fsprogs older than 1.47, drop `^orphan_file` (those versions
+do not know the feature and refuse the option):
 
 ```sh
 truncate -s 4G rootfs.img
@@ -272,31 +316,38 @@ Only do this after sections 3 and 4 are complete and verified.
 1. Battery below about 38 °C and Android idle. Writing 4 GiB heats the phone; we
    refused to start above 40.0 °C and stopped at 41.0 °C
    (`/sys/class/power_supply/battery/temp` is in tenths of a degree).
-2. Put the compressed image on the phone and verify it there:
+2. **PC:** put the compressed image on the phone. **Phone:** verify it there:
 
    ```sh
-   adb push rootfs.img.gz /data/local/tmp/
-   adb shell su -c 'sha256sum /data/local/tmp/rootfs.img.gz'      # must match the PC
+   adb push rootfs.img.gz /data/local/tmp/          # PC
+   sha256sum /data/local/tmp/rootfs.img.gz          # phone: must match the PC
    ```
 
-3. Write it. `bs=4194304 seek=1024` is exactly 4 GiB into `super`:
+3. **Phone:** write it. The first two tests stop before any write if `super` is
+   read-only or too small for the range; `bs=4194304 seek=1024` is exactly 4 GiB
+   into `super`:
 
    ```sh
-   adb shell su -c 'test "$(blockdev --getro /dev/block/by-name/super)" = 0 &&
-     gzip -dc /data/local/tmp/rootfs.img.gz |
-     dd of=/dev/block/by-name/super bs=4194304 seek=1024 conv=notrunc,fsync && sync'
+   set -o pipefail
+   [ "$(blockdev --getro /dev/block/by-name/super)" = 0 ] &&
+   [ "$(blockdev --getsize64 /dev/block/by-name/super)" -ge 8589934592 ] &&
+   gzip -dc /data/local/tmp/rootfs.img.gz |
+     dd of=/dev/block/by-name/super bs=4194304 seek=1024 conv=notrunc,fsync &&
+   sync && echo WRITE_OK
    ```
 
-4. Read it back and compare with the SHA-256 of `rootfs.img`:
+4. **Phone:** read it back and compare with the SHA-256 of `rootfs.img` on the PC:
 
    ```sh
-   adb shell su -c 'dd if=/dev/block/by-name/super bs=4194304 skip=1024 count=1024 2>/dev/null | sha256sum'
+   dd if=/dev/block/by-name/super bs=4194304 skip=1024 count=1024 2>/dev/null | sha256sum
    ```
 
    If it differs, restore the original range immediately (section 11) and stop.
+   If it matches, delete `/data/local/tmp/rootfs.img.gz`.
 
 We streamed the image over SSH instead of `adb push`, with a temperature gate
-every 30 s, but the write itself is the same `gzip -dc | dd`.
+every 30 s, but the write itself is the same `gzip -dc | dd`, run as root after
+the same kind of read-only and size checks.
 
 ## 10. First boot
 
@@ -326,9 +377,9 @@ the alias `redmi-linux-rootfs`, and use `StrictHostKeyChecking=yes`.)
 
 **You have 600 seconds.** If `redmi-boot-confirm` has not proven the server
 healthy by then, the watchdog reboots to Fastboot. Once Wi-Fi, address, route,
-gateway ping, firewall and the SSH port are all good, the service pauses the
-watchdog and creates `/run/redmi-boot-confirmed`. From then on the phone stays up
-and SSH works over the LAN: `ssh -p 2222 root@192.168.1.50`.
+gateway ping, firewall, the SSH port and the thermal guard are all good, the service
+pauses the watchdog and creates `/run/redmi-boot-confirmed`. From then on the phone
+stays up and SSH works over the LAN: `ssh -p 2222 root@192.168.1.50`.
 
 If the USB cable is replugged and the PC no longer sees the serial port, rebind the
 gadget from the phone: `echo "" > /sys/kernel/config/usb_gadget/redmi_probe/UDC;
@@ -341,36 +392,42 @@ headers.
 
 ## 11. Recovery: back to Android
 
-**From the running Linux** (either works; both send the phone to Fastboot):
+**From the running Linux**, over SSH (either works; both send the phone to Fastboot):
 
 ```sh
-# on the phone:
 /usr/local/sbin/redmi-reboot-bootloader --confirm-bootloader
 # or, if that is not available, poke the paused watchdog:
 kill -USR1 "$(cat /run/redmi-watchdog.pid)"; kill -CONT "$(cat /run/redmi-watchdog.pid)"
 ```
 
-**From Fastboot on the PC:**
+**PC, in Fastboot:** make sure it is the right phone and slot, then put the original
+`boot_b` back:
 
 ```sh
-fastboot flash boot_b boot_b.img      # your ORIGINAL, hash-verified backup
+fastboot getvar product          # pissarro
+fastboot getvar current-slot     # b
+fastboot flash boot_b boot_b.img # your ORIGINAL, hash-verified backup
 fastboot reboot
 ```
 
-Android boots again. Then put the original bytes back in the `super` range so
-Android's own data is intact (the range overlapped slot A):
+Android boots again. Put the original bytes back in the `super` range so Android's
+own data is intact (the range overlapped slot A's older table). **PC:**
+`adb push super-range-original.bin.gz /data/local/tmp/`, then on the **phone**:
 
 ```sh
-adb push super-range-original.bin.gz /data/local/tmp/
-adb shell su -c 'gzip -dc /data/local/tmp/super-range-original.bin.gz |
-  dd of=/dev/block/by-name/super bs=4194304 seek=1024 conv=notrunc,fsync && sync'
-adb shell su -c 'dd if=/dev/block/by-name/super bs=4194304 skip=1024 count=1024 2>/dev/null | sha256sum'
+sha256sum /dev/block/by-name/boot_b          # must equal the hash from section 3
+set -o pipefail
+[ "$(blockdev --getro /dev/block/by-name/super)" = 0 ] &&
+gzip -dc /data/local/tmp/super-range-original.bin.gz |
+  dd of=/dev/block/by-name/super bs=4194304 seek=1024 conv=notrunc,fsync &&
+sync && echo RESTORE_OK
+dd if=/dev/block/by-name/super bs=4194304 skip=1024 count=1024 2>/dev/null | sha256sum
 ```
 
-Compare with the hash you recorded in section 4. On our unit the whole round trip,
-starting from the running Linux, took 3 minutes 18 seconds, with `boot_b` and the
-range verified by hash. If you cannot reach Fastboot at all, use the hardware key
-combination for Fastboot on your phone; the bootloader itself was never modified.
+The last hash must equal the one you wrote down in section 4. On our unit the whole
+round trip, starting from the running Linux, took 3 minutes 18 seconds, with
+`boot_b` and the range verified by hash. If you cannot reach Fastboot at all, hold
+Volume Down + Power to enter it; the bootloader itself was never modified.
 
 ## 12. What each service does
 
@@ -418,8 +475,9 @@ combination for Fastboot on your phone; the bootloader itself was never modified
   frequency differed, and even `scaling_max_freq` did not contain the big cluster.
   The MediaTek PPM limit (`/proc/ppm/policy/hard_userlimit_max_cpu_freq`) did.
 - **OpenSSH refused key logins for the root account** while its password field was
-  locked (`!`). Use the non-password marker `NP` (done by `configure-rootfs.sh`);
-  password and keyboard-interactive stay disabled.
+  locked (`!`). `configure-rootfs.sh` sets it to `NP`, which no password can match
+  and which OpenSSH does not treat as locked; password and keyboard-interactive stay
+  disabled.
 - **Windows and USB serial.** Windows purges serial input when a COM port opens, so
   the rescue listener waits for a `STARTSSH` line and only then answers
   `BOOTSTRAP_READY` and starts `sshd -i`. Use `serial-ssh-proxy.py`, which does
@@ -437,7 +495,8 @@ combination for Fastboot on your phone; the bootloader itself was never modified
 
 ## 15. Known limitations
 
-- 4 GiB rootfs, in a range that Android's OTA can overwrite.
+- 4 GiB rootfs, in a range that Android's OTA can overwrite (Virtual A/B keeps its
+  update snapshots in free space of `super`).
 - Requires an unlocked bootloader and root on Android; verified-boot is bypassed.
 - Kernel 4.14 with vendor drivers; no mainline support.
 - Tested on one unit and one ROM. Partition layouts and calibration paths may differ.

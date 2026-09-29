@@ -6,8 +6,8 @@ you plan to overwrite overlaps partitions of the ACTIVE slot (that would break t
 Android you are running: do not proceed) or of the INACTIVE slot (allowed, but see
 docs/TUTORIAL.md: an OTA update or a slot switch can then destroy your rootfs).
 
-    adb shell su -c 'lpdump --slot=1' > lp-active.txt      # slot b = 1 (check yours!)
-    adb shell su -c 'lpdump --slot=0' > lp-inactive.txt
+    adb exec-out "su -c 'lpdump --slot=1'" > lp-active.txt      # slot b = 1 (check yours!)
+    adb exec-out "su -c 'lpdump --slot=0'" > lp-inactive.txt
     python3 check-super-range.py --active lp-active.txt --inactive lp-inactive.txt
 
 It only reads text files. It never talks to a phone.
@@ -20,6 +20,7 @@ import sys
 SECTOR = 512
 LAYOUT = re.compile(r'^super: (\d+) \.\. (\d+): (\S+) ', re.M)   # end is exclusive
 SUPER_SIZE = re.compile(r'Partition name: super\s+First sector: \d+\s+Size: (\d+) bytes')
+VIRTUAL_AB = re.compile(r'^Header flags:.*\bvirtual_ab_device\b', re.M)
 
 
 def extents(text):
@@ -63,6 +64,9 @@ def main():
     print(f'super size            : {super_bytes} bytes ({super_bytes / 1024**3:.2f} GiB)')
     print(f'planned range         : [{start}, {end})  = {start / 1024**3:.2f} .. {end / 1024**3:.2f} GiB')
     print(f'active slot ends at   : {max(b for _, b, _ in active) / 1024**3:.2f} GiB')
+    if VIRTUAL_AB.search(active_text):
+        print('virtual A/B device    : yes -> an OTA writes its snapshot data into free space of super;')
+        print('                        keep OTA updates off while your rootfs lives there.')
     if args.inactive:
         inactive = extents(args.inactive.read_text())
         hit_inactive = overlaps(inactive, start, end)

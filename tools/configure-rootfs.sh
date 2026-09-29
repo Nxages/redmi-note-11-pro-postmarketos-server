@@ -46,8 +46,9 @@ render() {  # source destination mode
         -e "s|@LAN_CIDR@|$LAN_CIDR|g" -e "s|@PREFIX_LEN@|$PREFIX_LEN|g" "$1" > "$2"
 }
 
-# --- device nodes the initramfs hands over before udev runs
-mkdir -p "$ROOT/dev"
+# --- mount points the initramfs moves /dev, /proc and /sys onto, and device
+#     nodes it hands over before udev runs
+mkdir -p "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run"
 for entry in 'null 1 3 0666' 'zero 1 5 0666' 'random 1 8 0666' \
     'urandom 1 9 0666' 'tty 5 0 0666' 'console 5 1 0600'; do
     set -- $entry
@@ -77,8 +78,10 @@ render "$TEMPLATES/etc/ssh/sshd_config" "$ROOT/etc/ssh/sshd_config" 0644
 render "$TEMPLATES/etc/conf.d/sshd" "$ROOT/etc/conf.d/sshd" 0644
 render "$TEMPLATES/etc/conf.d/redmi-wifi" "$ROOT/etc/conf.d/redmi-wifi" 0644
 
-# OpenSSH rejects a locked account even for public-key logins. Use the documented
-# non-password marker; password and keyboard-interactive stay disabled.
+# OpenSSH rejects a locked account ("!") even for public-key logins, so root gets
+# "NP": no password can match it and OpenSSH does not treat it as locked. Password
+# and keyboard-interactive stay disabled. Every other account is locked, including
+# the user pmbootstrap created with the throwaway install password.
 python3 - "$ROOT/etc/shadow" <<'PY'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
@@ -86,16 +89,21 @@ lines = p.read_text().splitlines(keepends=True)
 matches = [i for i, line in enumerate(lines) if line.split(':', 1)[0] == 'root']
 if len(matches) != 1:
     raise SystemExit('Unexpected root account entry count; refusing the auth edit')
-i = matches[0]
-newline = '\n' if lines[i].endswith('\n') else ''
-fields = lines[i].rstrip('\n').split(':')
-if fields[1] in ('NP', '*NP*'):
-    pass
-elif fields[1].startswith(('!', '*')):
-    fields[1] = 'NP'
-else:
-    raise SystemExit('Root account already has a password field; refusing to replace it')
-lines[i] = ':'.join(fields) + newline
+for i, line in enumerate(lines):
+    newline = '\n' if line.endswith('\n') else ''
+    fields = line.rstrip('\n').split(':')
+    if len(fields) < 2:
+        raise SystemExit('Malformed shadow entry; refusing the auth edit')
+    if fields[0] == 'root':
+        if fields[1] in ('NP', '*NP*'):
+            pass
+        elif fields[1].startswith(('!', '*')):
+            fields[1] = 'NP'
+        else:
+            raise SystemExit('Root account already has a password field; refusing to replace it')
+    elif not fields[1].startswith(('!', '*')):
+        fields[1] = '!'
+    lines[i] = ':'.join(fields) + newline
 p.write_text(''.join(lines))
 PY
 

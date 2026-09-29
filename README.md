@@ -9,10 +9,13 @@ Português: [README.pt-BR.md](README.pt-BR.md)
 
 > **Warning.** This overwrites part of the `super` partition and replaces `boot_b`.
 > It needs an unlocked bootloader and can brick the phone. The storage range it
-> uses overlaps the inactive Android slot, so **an OTA update or a slot switch can
-> destroy your Linux**. Read [docs/TUTORIAL.md](docs/TUTORIAL.md), section 0, before
-> anything else. This is a field report from one unit, not a supported procedure.
-> Not affiliated with Xiaomi, MediaTek or postmarketOS.
+> uses overlaps the inactive Android slot's old table and is where a Virtual A/B
+> OTA keeps its snapshots, so **an OTA update or a slot switch can destroy your
+> Linux**. Only for `pissarro` (MT6877 / Dimensity 920): other phones sold as
+> Redmi Note 11 Pro, such as the global 4G and 5G models, are different hardware.
+> Read [docs/TUTORIAL.md](docs/TUTORIAL.md), section 0, before anything else. This
+> is a field report from one unit, not a supported procedure. Not affiliated with
+> Xiaomi, MediaTek or postmarketOS.
 
 ## What was verified on the reference unit
 
@@ -26,9 +29,9 @@ Português: [README.pt-BR.md](README.pt-BR.md)
 | Reboot cycles | 5 of 5 passed |
 | Charge window 60–80 %, thermal protection | working |
 | Screen, camera and microphone nodes disabled | working |
-| Boot image reproducible from the sources here | byte-identical to the installed one |
+| Boot image builder (`tools/build-boot-image.py`) | reproduced the installed image byte for byte from the same inputs |
 | Rootfs configuration script | run against a fresh rootfs copy; same binaries and runlevel as the phone |
-| 24 h stability run | in progress when this was written |
+| 24 h stability run | the first run was ended by the 5 h Wi-Fi stall above; a second run, with the guard, was in progress when this was written |
 
 ## What is in here
 
