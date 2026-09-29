@@ -31,7 +31,7 @@ Português: [README.pt-BR.md](README.pt-BR.md)
 | Screen, camera and microphone nodes disabled | working |
 | Boot image builder (`tools/build-boot-image.py`) | reproduced the installed image byte for byte from the same inputs |
 | Rootfs configuration script | run against a fresh rootfs copy; same binaries and runlevel as the phone |
-| 24 h stability run | the first run was ended by the 5 h Wi-Fi stall above; a second run, with the guard, was in progress when this was written |
+| 24 h stability run | passed on a second run, with the guard: no reboot, and Wi-Fi, gateway, SSH, firewall and thermal guard up in every 10-minute sample (the first run was ended by the 5 h Wi-Fi stall above) |
 
 ## What is in here
 

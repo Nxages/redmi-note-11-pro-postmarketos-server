@@ -31,7 +31,7 @@ English: [README.md](README.md)
 | Nós de tela, câmera e microfone desativados | funcionando |
 | Montador da imagem de boot (`tools/build-boot-image.py`) | reproduziu a imagem instalada byte a byte a partir das mesmas entradas |
 | Script de configuração do rootfs | executado contra uma cópia nova do rootfs; mesmos binários e runlevel do aparelho |
-| Teste de estabilidade de 24 h | a primeira rodada foi encerrada pela queda de Wi-Fi de 5 h acima; uma segunda rodada, com o vigia, estava em andamento na data em que isto foi escrito |
+| Teste de estabilidade de 24 h | aprovado na segunda rodada, com o vigia: sem reinício, e Wi-Fi, gateway, SSH, firewall e guarda térmico ativos em todas as amostras de 10 minutos (a primeira rodada foi encerrada pela queda de Wi-Fi de 5 h acima) |
 
 ## O que há aqui
 
