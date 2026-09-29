@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+description="Recover a Wi-Fi association the supplicant does not restore"
+supervisor=supervise-daemon
+command=/usr/local/sbin/redmi-wifi-guard
+command_user=root
+pidfile=/run/redmi-wifi-guard.pid
+respawn_delay=30
+respawn_max=0
+respawn_period=0
+output_log=/dev/null
+error_log=/dev/null
+
+depend() {
+    need redmi-wifi
+    after redmi-boot-confirm
+}

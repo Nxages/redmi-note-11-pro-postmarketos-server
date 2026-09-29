@@ -1,0 +1,22 @@
+#!/bin/sh
+# Device-side health logger, run by the redmi-soak-logger service. Every 10
+# minutes it appends one line of hardware and service state to
+# /var/lib/redmi-soak/health.log. No application data and no Wi-Fi credentials
+# are read. It keeps logging if the PC goes away.
+LOG=/var/lib/redmi-soak/health.log
+mkdir -p /var/lib/redmi-soak
+state() { rc-service "$1" status 2>&1 | sed -n 's/.*status: //p'; }
+thermal() { sed -n "s/^$1=//p" /run/redmi-thermal.state 2>/dev/null; }
+while :; do
+    wd=$(cat /run/redmi-watchdog.pid 2>/dev/null)
+    if ping -c 1 -W 2 @GATEWAY_IP@ >/dev/null 2>&1; then gateway=yes; else gateway=no; fi
+    printf '%s\n' "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ) up=$(cut -d. -f1 /proc/uptime) boot=$(cut -c1-8 /proc/sys/kernel/random/boot_id) \
+wpa=$(wpa_cli -p /run/wpa_supplicant -i wlan0 status 2>/dev/null | sed -n 's/^wpa_state=//p') gateway=$gateway \
+watchdog=$(awk '/^State:/ { print $2 }' "/proc/$wd/status" 2>/dev/null) \
+wifi=$(state redmi-wifi) fw=$(state nftables) sshd=$(state sshd) thermal=$(state redmi-thermal) \
+privacy=$(state redmi-privacy) chrony=$(state chronyd) backlight=$(cat /sys/class/leds/lcd-backlight/brightness 2>/dev/null) \
+bat_mC=$(thermal battery_mC) cpu_mC=$(thermal cpu_mC) chg_mC=$(thermal charger_mC) cap=$(thermal capacity) charging=$(thermal charging) reason=$(thermal reason) \
+mem_avail_mb=$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo) root_free_mb=$(df -Pk / | awk 'NR==2 { print int($4 / 1024) }') \
+load1=$(cut -d' ' -f1 /proc/loadavg)" >> "$LOG"
+    sleep 600
+done

@@ -1,0 +1,134 @@
+#!/sbin/openrc-run
+description="MT6877 Wi-Fi firmware and LAN association"
+supervisor=supervise-daemon
+command=/usr/sbin/wpa_supplicant
+command_args="-D nl80211 -i wlan0 -c /etc/wpa_supplicant/redmi-migration.conf"
+command_user=root
+pidfile=/run/redmi-wpa.pid
+respawn_delay=5
+respawn_max=0
+respawn_period=0
+output_log=/dev/null
+error_log=/dev/null
+retry="TERM/3/KILL/5"
+stage_file=/run/redmi-wifi-stage
+
+stage_record() {
+    printf '%s=%s\n' "$1" "$2" >> "$stage_file"
+}
+
+stage_rc() {
+    local value="$2"
+    case "$value" in
+        ''|*[!0-9]*) value=unknown ;;
+    esac
+    stage_record "$1" "$value"
+}
+
+wifi_state() {
+    local value
+    value=$(/usr/sbin/wpa_cli -p /run/wpa_supplicant -i wlan0 status 2>/dev/null \
+        | /bin/busybox sed -n 's/^wpa_state=\([A-Z0-9_]*\)$/\1/p' \
+        | /bin/busybox head -n 1)
+    case "$value" in
+        COMPLETED|DISCONNECTED|SCANNING|INACTIVE|ASSOCIATING|ASSOCIATED|4WAY_HANDSHAKE|GROUP_HANDSHAKE)
+            printf '%s' "$value" ;;
+        *) printf 'unknown' ;;
+    esac
+}
+
+depend() {
+    need localmount redmi-thermal
+    before sshd
+}
+
+start_pre() {
+    umask 077
+    : > "$stage_file" || return 1
+    chmod 0600 "$stage_file" || return 1
+    stage_record phase start_pre
+
+    if [ -x /usr/local/sbin/wifi-init ]; then stage_record wifi_init_executable yes; else stage_record wifi_init_executable no; return 1; fi
+    if [ -x /usr/sbin/ip ]; then stage_record ip_executable yes; else stage_record ip_executable no; return 1; fi
+    if [ -x /usr/sbin/wpa_supplicant ]; then stage_record supplicant_executable yes; else stage_record supplicant_executable no; return 1; fi
+    if [ -x /usr/sbin/wpa_cli ]; then stage_record wpa_cli_executable yes; else stage_record wpa_cli_executable no; return 1; fi
+    if [ -r /etc/wpa_supplicant/redmi-migration.conf ]; then stage_record wpa_config_readable yes; else stage_record wpa_config_readable no; return 1; fi
+    if [ -s /etc/hardware/wifi-nvram.bin ]; then stage_record calibration_file_present yes; else stage_record calibration_file_present no; return 1; fi
+    if [ -s /vendor/firmware/WIFI_RAM_CODE_soc5_0_1_1.bin ]; then stage_record wifi_firmware_present yes; else stage_record wifi_firmware_present no; fi
+    local config_mode
+    config_mode=$(/bin/busybox stat -c '%a' /etc/wpa_supplicant/redmi-migration.conf 2>/dev/null)
+    if [ "$config_mode" = 600 ]; then stage_record wpa_config_private_mode yes; else stage_record wpa_config_private_mode no; fi
+
+    if echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6; then stage_record ipv6_all_disable_rc 0; else local rc=$?; stage_rc ipv6_all_disable_rc "$rc"; return 1; fi
+    if echo 1 > /proc/sys/net/ipv6/conf/default/disable_ipv6; then stage_record ipv6_default_disable_rc 0; else local rc=$?; stage_rc ipv6_default_disable_rc "$rc"; return 1; fi
+    if mkdir -p /run/wpa_supplicant && [ -w /run/wpa_supplicant ]; then stage_record control_dir_writable yes; else stage_record control_dir_writable no; return 1; fi
+
+    if /usr/local/sbin/wifi-init >/dev/null 2>&1; then local rc=0; else local rc=$?; fi
+    stage_rc wifi_init_exit "$rc"
+    if [ "$rc" -ne 0 ]; then return 1; fi
+    if [ -d /sys/class/net/wlan0 ]; then stage_record wlan0_present yes; else stage_record wlan0_present no; return 1; fi
+    if /usr/sbin/ip link set wlan0 up >/dev/null 2>&1; then local rc=0; else local rc=$?; fi
+    stage_rc wlan0_link_up_exit "$rc"
+    [ "$rc" -eq 0 ]
+}
+
+start_post() {
+    local attempt
+    stage_record phase start_post
+    if [ -s /run/redmi-wpa.pid ]; then
+        local wpa_pid
+        wpa_pid=$(/bin/busybox cat /run/redmi-wpa.pid 2>/dev/null)
+        case "$wpa_pid" in ''|*[!0-9]*) stage_record supervisor_pid_state unknown ;;
+            *) if kill -0 "$wpa_pid" 2>/dev/null; then stage_record supervisor_pid_state alive; else stage_record supervisor_pid_state dead; fi ;;
+        esac
+    else
+        stage_record supervisor_pid_state missing
+    fi
+    if /usr/sbin/wpa_cli -p /run/wpa_supplicant -i wlan0 ping >/dev/null 2>&1; then
+        stage_record control_socket_responsive_initial yes
+    else
+        stage_record control_socket_responsive_initial no
+    fi
+    for attempt in $(/bin/busybox seq 1 45); do
+        local state
+        state=$(wifi_state)
+        if [ "$state" = COMPLETED ]; then
+            stage_record wifi_state "$state"
+            stage_record association_attempt "$attempt"
+            if /usr/sbin/ip addr replace @DEVICE_IP@/@PREFIX_LEN@ dev wlan0 >/dev/null 2>&1; then
+                stage_record address_config_exit 0
+            else
+                local rc=$?
+                stage_rc address_config_exit "$rc"
+                return 1
+            fi
+            if /usr/sbin/ip route replace default via @GATEWAY_IP@ dev wlan0 >/dev/null 2>&1; then
+                stage_record route_config_exit 0
+            else
+                local rc=$?
+                stage_rc route_config_exit "$rc"
+                return 1
+            fi
+            if /usr/sbin/wpa_cli -p /run/wpa_supplicant -i wlan0 ping >/dev/null 2>&1; then
+                stage_record control_socket_responsive_final yes
+            else
+                stage_record control_socket_responsive_final no
+            fi
+            return 0
+        fi
+        sleep 1
+    done
+    stage_record wifi_state "$(wifi_state)"
+    if /usr/sbin/wpa_cli -p /run/wpa_supplicant -i wlan0 ping >/dev/null 2>&1; then
+        stage_record control_socket_responsive_final yes
+    else
+        stage_record control_socket_responsive_final no
+    fi
+    stage_record association_attempts 45
+    return 1
+}
+
+stop_post() {
+    /usr/sbin/ip addr flush dev wlan0 >/dev/null 2>&1 || true
+    /usr/sbin/ip link set wlan0 down >/dev/null 2>&1 || true
+}

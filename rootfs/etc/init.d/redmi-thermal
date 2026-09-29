@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+description="Thermal guard and 60-80% charge window for the always-plugged server"
+supervisor=supervise-daemon
+command=/usr/local/sbin/redmi-thermal-daemon
+command_args="--daemon"
+command_user=root
+pidfile=/run/redmi-thermal-guard.pid
+respawn_delay=5
+respawn_max=0
+respawn_period=0
+output_log=/dev/null
+error_log=/dev/null
+retry="TERM/3/KILL/5"
+
+depend() {
+    need localmount
+    before redmi-wifi
+}

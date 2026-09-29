@@ -1,0 +1,29 @@
+# Parameters measured from the stock boot_b image of the reference unit.
+deviceinfo_format_version="0"
+deviceinfo_name="Xiaomi Redmi Note 11 Pro (MT6877, experimental)"
+deviceinfo_manufacturer="Xiaomi"
+deviceinfo_codename="xiaomi-pissarro"
+deviceinfo_year="2021"
+deviceinfo_arch="aarch64"
+deviceinfo_chassis="handset"
+deviceinfo_external_storage="false"
+
+# Do not allow generic pmbootstrap flasher commands to write this device.
+# The final partition layout has NOT been validated yet.
+deviceinfo_flash_method="none"
+deviceinfo_generate_bootimg="true"
+deviceinfo_header_version="2"
+deviceinfo_flash_pagesize="2048"
+deviceinfo_flash_offset_base="0x40000000"
+deviceinfo_flash_offset_kernel="0x00080000"
+deviceinfo_flash_offset_ramdisk="0x11100000"
+deviceinfo_flash_offset_second="0x00000000"
+deviceinfo_flash_offset_tags="0x07c80000"
+deviceinfo_flash_offset_dtb="0x07c80000"
+deviceinfo_dtb="mediatek/mt6877"
+deviceinfo_append_dtb="false"
+deviceinfo_rootfs_image_sector_size="4096"
+
+deviceinfo_usb_network_function="rndis"
+deviceinfo_usb_idVendor="0x18D1"
+deviceinfo_usb_idProduct="0xD001"

@@ -1,0 +1,29 @@
+# Experimental device package used to build the kernel for this project with
+# pmbootstrap. deviceinfo_flash_method is "none" ON PURPOSE: pmbootstrap must never
+# flash this phone. The boot image is assembled by tools/build-boot-image.py.
+maintainer="Local experimental build <local-build@example.invalid>"
+pkgname=device-xiaomi-pissarro
+pkgver=0.1
+pkgrel=0
+pkgdesc="Redmi Note 11 Pro MT6877 - experimental headless port"
+url="https://postmarketos.org"
+license="MIT"
+arch="aarch64"
+options="!check !archcheck"
+depends="postmarketos-base linux-xiaomi-pissarro mkbootimg"
+makedepends="devicepkg-dev"
+source="deviceinfo kernel-cmdline.conf"
+
+build() {
+	devicepkg_build "$startdir" "$pkgname"
+}
+
+package() {
+	devicepkg_package "$startdir" "$pkgname"
+}
+
+# sha512sums of the source files listed above (regenerate with: abuild checksum)
+sha512sums="
+0734bb3fbadcbf2ec10b75ee799f750772a0f931b53c90bd4992dbbd13a8e8a0ebd5990f61334fb0f414307a68074f9d0d527ef0302bd66ce854ad0b5684e4b6  deviceinfo
+c56fde124ffea167b8e613e9745d10935ca7721cb5d4a2e5a13a3ad803189720556e48caba3c35bc7c75ba457a4584a0b7f80b65ba602d7dda8ae2c99f760f31  kernel-cmdline.conf
+"

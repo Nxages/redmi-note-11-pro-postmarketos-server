@@ -1,0 +1,24 @@
+flush ruleset
+table ip filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        ip saddr 127.0.0.0/8 accept
+        ct state established,related accept
+        ip saddr @LAN_CIDR@ ip protocol tcp tcp dport 2222 accept
+        ip saddr @LAN_CIDR@ ip protocol icmp accept
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+table ip6 filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+}

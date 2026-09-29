@@ -1,0 +1,62 @@
+# Kernel package for the Redmi Note 11 Pro (MT6877), built from the public
+# "hydrogen" 4.14 source tree at the commit below. The compiled Image.gz booted
+# on the unit described in docs/TUTORIAL.md together with the stock DTB.
+# Known gap: CONFIG_NFT_META and the nf_tables set backends are not enabled, see
+# docs/TUTORIAL.md ("Firewall on kernel 4.14").
+maintainer="Local experimental build <local-build@example.invalid>"
+pkgname=linux-xiaomi-pissarro
+pkgver=4.14.356
+pkgrel=0
+pkgdesc="Hydrogen MT6877 kernel for experimental Linux bring-up"
+arch="aarch64"
+url="https://github.com/pissarro-development/android_kernel_xiaomi_pissarro-hydrogen"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps pmb:cross-native"
+makedepends="bash bc bison clang devicepkg-dev dtc elfutils-dev flex linux-headers lld llvm openssl-dev perl python3"
+_commit="a934c78bdeab3a028a88e31a089f3502ad590a6d"
+_repository="android_kernel_xiaomi_pissarro-hydrogen"
+_carch="arm64"
+_flavor="xiaomi-pissarro"
+_config="config-$_flavor.$arch"
+_outdir="out"
+source="
+	$pkgname-$_commit.tar.gz::$url/archive/$_commit.tar.gz
+	$_config
+	required.config
+	0001-use-host-dtc.patch
+"
+builddir="$srcdir/$_repository-$_commit"
+
+prepare() {
+	default_prepare
+	export LLVM=1
+	REPLACE_GCCH=0 . downstreamkernel_prepare
+}
+
+build() {
+	unset LDFLAGS
+	make O="$_outdir" ARCH="$_carch" LLVM=1 LLVM_IAS=1 \
+		CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+		OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+		KBUILD_BUILD_USER=redmi-linux KBUILD_BUILD_HOST=local \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1))-postmarketOS" \
+		Image.gz dtbs
+}
+
+package() {
+	export KERNEL_IMAGE_NAME=Image.gz
+	downstreamkernel_package "$builddir" "$pkgdir" "$_carch" "$_flavor" "$_outdir"
+	install -Dm644 "$_outdir/arch/arm64/boot/dts/mediatek/mt6877.dtb" \
+		"$pkgdir/boot/dtbs/mediatek/mt6877.dtb"
+	# Preserve the matching overlay as an artifact; generic flashing is disabled.
+	install -Dm644 "$_outdir/arch/arm64/boot/dts/mediatek/pissarro.dtbo" \
+		"$pkgdir/usr/share/kernel/$_flavor/pissarro.dtbo"
+}
+
+# sha512sums of the source files listed above (regenerate with: abuild checksum)
+sha512sums="
+9a228d0e76f4b064fa5d380ca249a5748cdbc1c4af7e15545ed266c39938005c3d25ae84eee9c8e134608dc7bba94b297ac8c052a6e89237f0678ce36be25d3c  linux-xiaomi-pissarro-a934c78bdeab3a028a88e31a089f3502ad590a6d.tar.gz
+6c8b68d2effcd03d2bc7c195db93a312fe578633b6583ad3d9c22166b13aa15f3610ccb5d3d89ad9fccdea08a31f805e0fbb70ea2c14421be58a6f7b39e67057  config-xiaomi-pissarro.aarch64
+ebc50198059eec82911440717e2b9794bb37a0f150c183d759df175152a891793333246b46c171c14c7598a778d530b775be9fda5c1a25e7143b774da8edb806  required.config
+f80967cbac38696a7aca152d6fd6f9220fe9f9039dbdf751dfe39880a39f9c256bf6755a16288313a1f36f80c4591757ec2efea8daeda2dadfd4ccb59999ebc6  0001-use-host-dtc.patch
+"

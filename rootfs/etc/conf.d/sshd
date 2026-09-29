@@ -1,0 +1,2 @@
+sshd_disable_keygen="yes"
+rc_need="nftables"

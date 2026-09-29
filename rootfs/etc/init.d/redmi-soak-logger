@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+description="Append one server health line every 10 minutes"
+supervisor=supervise-daemon
+command=/usr/local/sbin/redmi-soak-logger
+command_user=root
+pidfile=/run/redmi-soak-logger.pid
+respawn_delay=30
+respawn_max=0
+respawn_period=0
+output_log=/dev/null
+error_log=/dev/null
+
+depend() {
+    need localmount
+    after redmi-boot-confirm
+}

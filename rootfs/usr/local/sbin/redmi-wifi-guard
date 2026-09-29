@@ -1,0 +1,43 @@
+#!/bin/sh
+# Recover a Wi-Fi association that wpa_supplicant does not restore by itself.
+# Seen on this phone: after the router dropped the link overnight, the supplicant
+# sat in SCANNING for 5 hours with the network visible at -40 dBm; one manual
+# scan brought it back. Escalation instead of waiting:
+#   ~1 min  scan   ~2 min  reassociate   ~5 min  restart ONLY wpa_supplicant
+# (supervise-daemon respawns it; no dependent service restarts), then every ~3 min.
+# Each step plus an opaque snapshot (counts and signal only; no SSID, BSSID or
+# key) is appended to /var/lib/redmi-soak/wifi-guard.log.
+LOG=/var/lib/redmi-soak/wifi-guard.log
+CLI="/usr/sbin/wpa_cli -p /run/wpa_supplicant -i wlan0"
+mkdir -p /var/lib/redmi-soak
+note() { echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
+snapshot() {
+    want=$($CLI get_network 0 ssid 2>/dev/null); want=${want#\"}; want=${want%\"}
+    seen=$($CLI scan_results 2>/dev/null | tail -n +2 | awk -F'\t' -v w="$want" \
+        'BEGIN { n = 0; ours = "none" } { n++ } $5 == w && w != "" { ours = $2 "/" $3 } END { print "seen=" n " ours=" ours }')
+    note "snapshot state=$1 bad=$bad $seen link=$(cat /sys/class/net/wlan0/operstate 2>/dev/null)"
+}
+bad=0
+note "start"
+while :; do
+    sleep 20
+    state=$($CLI status 2>/dev/null | sed -n 's/^wpa_state=//p')
+    if [ "$state" = COMPLETED ] && ping -c 1 -W 3 @GATEWAY_IP@ >/dev/null 2>&1; then
+        [ "$bad" -gt 0 ] && note "recovered after_checks=$bad"
+        bad=0
+        continue
+    fi
+    bad=$((bad + 1))
+    case "$bad" in
+        3) snapshot "${state:-none}"; $CLI scan >/dev/null 2>&1; note "action=scan" ;;
+        6) snapshot "${state:-none}"; $CLI reassociate >/dev/null 2>&1; note "action=reassociate" ;;
+        15)
+            snapshot "${state:-none}"
+            pid=$(pidof wpa_supplicant)
+            case "$pid" in
+                ''|*[!0-9]*) note "action=restart_skipped pids=${pid:-none}" ;;
+                *) kill "$pid"; note "action=restart_supplicant" ;;
+            esac
+            bad=6 ;;
+    esac
+done

@@ -1,0 +1,42 @@
+#!/sbin/openrc-run
+description="Screen off; remove camera, microphone and unused radio device nodes"
+
+depend() {
+    need localmount
+}
+
+camera_nodes() {
+    for v in /sys/class/video4linux/video*; do
+        if [ "$(/bin/busybox cat "$v/name" 2>/dev/null)" = dpe-vid ] && [ -e "/dev/${v##*/}" ]; then
+            echo "/dev/${v##*/}"
+        fi
+    done
+    /bin/busybox ls -d /dev/kd_camera_hw /dev/seninf /dev/camera-* /dev/camera_eeprom* 2>/dev/null
+}
+
+capture_nodes() {
+    /bin/busybox ls -d /dev/snd/pcmC*D*c /dev/ccci_raw_audio 2>/dev/null
+}
+
+# Bluetooth, GPS, infrared and fingerprint: powered off in conninfra and never
+# opened by the server; removing the nodes keeps it that way.
+unused_nodes() {
+    /bin/busybox ls -d /dev/stpbt /dev/fw_log_bt /dev/fw_log_btmcu /dev/gpsdl0 /dev/gpsdl1 \
+        /dev/gps_emi /dev/irtx /dev/goodix_fp /dev/teei_fp 2>/dev/null
+}
+
+start() {
+    ebegin "Turning the screen off and removing camera, microphone and radio nodes"
+    # Only the backlight: the mt6360 flash driver briefly fires the camera
+    # flash on every brightness write, even a write of 0, and it is off anyway.
+    echo 0 > /sys/class/leds/lcd-backlight/brightness
+    camera_nodes | while read -r node; do /bin/busybox rm -f "$node"; done
+    capture_nodes | while read -r node; do /bin/busybox rm -f "$node"; done
+    unused_nodes | while read -r node; do /bin/busybox rm -f "$node"; done
+    [ "$(/bin/busybox cat /sys/class/leds/lcd-backlight/brightness 2>/dev/null)" = 0 ] || { eend 1 "backlight still on"; return 1; }
+    [ -z "$(camera_nodes)" ] || { eend 1 "camera nodes remain"; return 1; }
+    [ -z "$(capture_nodes)" ] || { eend 1 "capture nodes remain"; return 1; }
+    [ -z "$(unused_nodes)" ] || { eend 1 "radio nodes remain"; return 1; }
+    : > /run/redmi-privacy-applied
+    eend 0
+}

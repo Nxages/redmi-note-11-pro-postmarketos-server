@@ -1,0 +1,42 @@
+#!/sbin/openrc-run
+description="Pause the boot watchdog once the server is verified healthy"
+
+depend() {
+    need redmi-wifi nftables sshd redmi-thermal
+}
+
+healthy() {
+    [ "$(/usr/sbin/wpa_cli -p /run/wpa_supplicant -i wlan0 status 2>/dev/null | /bin/busybox sed -n 's/^wpa_state=//p')" = COMPLETED ] || return 1
+    /usr/sbin/ip -4 addr show dev wlan0 2>/dev/null | /bin/busybox grep -qF '@DEVICE_IP@/@PREFIX_LEN@' || return 1
+    /usr/sbin/ip route show default 2>/dev/null | /bin/busybox grep -qF 'via @GATEWAY_IP@' || return 1
+    /bin/busybox ping -c 1 -W 2 @GATEWAY_IP@ >/dev/null 2>&1 || return 1
+    /usr/sbin/nft list tables 2>/dev/null | /bin/busybox grep -qx 'table ip filter' || return 1
+    /bin/busybox awk '$2 ~ /:08AE$/ && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' /proc/net/tcp || return 1
+    [ -s /run/redmi-thermal.state ] || return 1
+}
+
+start() {
+    ebegin "Verifying server health before pausing the boot watchdog"
+    attempt=0
+    until healthy; do
+        attempt=$((attempt + 1))
+        if [ "$attempt" -ge 30 ]; then
+            eend 1 "server not healthy; the watchdog will return to the bootloader"
+            return 1
+        fi
+        sleep 2
+    done
+    wd=$(/bin/busybox cat /run/redmi-watchdog.pid 2>/dev/null || true)
+    case "$wd" in ''|*[!0-9]*) eend 1 "watchdog pid unavailable"; return 1 ;; esac
+    if [ "$(/bin/busybox awk '/^PPid:/ { print $2 }' "/proc/$wd/status" 2>/dev/null)" != 1 ]; then
+        eend 1 "unexpected watchdog parent"
+        return 1
+    fi
+    /bin/busybox kill -STOP "$wd"
+    if [ "$(/bin/busybox awk '/^State:/ { print $2 }' "/proc/$wd/status" 2>/dev/null)" != T ]; then
+        eend 1 "watchdog not paused"
+        return 1
+    fi
+    : > /run/redmi-boot-confirmed
+    eend 0
+}

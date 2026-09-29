@@ -1,0 +1,45 @@
+# Never commit anything that comes from, or describes, a real phone or network.
+# Disk and boot images (contain vendor firmware and your data)
+*.img
+*.img.gz
+*.bin
+*.dtb
+*.dtbo
+Image
+Image.gz
+*.cpio
+*.cpio.gz
+out/
+build/
+
+# Vendor firmware and per-device calibration (copyrighted / unique to a unit)
+vendor/
+firmware/
+wifi-nvram*
+wifi-hardware-calibration*
+nvdata*
+
+# Credentials, keys and network profiles
+*.pem
+*.key
+id_*
+*.pub
+known_hosts*
+authorized_keys
+wpa_supplicant*.conf
+*.psk
+*.env
+.env*
+
+# Logs and evidence from a real unit (device IDs, addresses, health history)
+*.log
+soak*.txt
+evidence/
+private/
+*-private*
+
+# Python and editors
+__pycache__/
+*.pyc
+.vscode/
+.idea/
